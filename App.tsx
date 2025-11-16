@@ -7,9 +7,7 @@ import { KeyIcon, SparklesIcon } from './components/icons';
 import { GoogleGenAI } from '@google/genai';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
-// Fix: Removed conflicting TypeScript declarations for `window.aistudio`.
-// These declarations are likely already provided by a global type definition file from a dependency,
-// and re-declaring them causes a conflict. The compiler will now use the correct existing types.
+const API_KEY_STORAGE_KEY = 'gemini-api-key';
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
@@ -17,16 +15,15 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
 
-  const checkApiKey = useCallback(async () => {
-    try {
-      const keySelected = await window.aistudio.hasSelectedApiKey();
-      setHasApiKey(keySelected);
-    } catch (e) {
-      console.error("Error checking for API key:", e);
-      setHasApiKey(false);
+  const checkApiKey = useCallback(() => {
+    const storedKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (storedKey) {
+      setApiKey(storedKey);
+    } else {
+      setIsApiKeyModalOpen(true);
     }
   }, []);
 
@@ -34,38 +31,58 @@ const App: React.FC = () => {
     checkApiKey();
   }, [checkApiKey]);
 
-  const handleSelectKey = async () => {
-    try {
-      await window.aistudio.openSelectKey();
-      // Assume success to handle potential race condition
-      setHasApiKey(true);
-      setError(null); // Clear previous API key errors
-      setIsApiKeyModalOpen(false); // Close modal on success
-    } catch (e) {
-      console.error("Error opening select key dialog:", e);
-      // Don't change hasApiKey state on cancellation
+  const handleSaveAndTestKey = useCallback(async (keyToTest: string) => {
+    if (!keyToTest.trim()) {
+      throw new Error("API 키를 입력해주세요.");
     }
+    const ai = new GoogleGenAI({ apiKey: keyToTest });
+    try {
+      // Use a lightweight model for a quick and cheap validation call
+      await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: 'test' });
+      localStorage.setItem(API_KEY_STORAGE_KEY, keyToTest);
+      setApiKey(keyToTest);
+      setIsApiKeyModalOpen(false);
+      setError(null);
+    } catch (e) {
+      console.error("API Key validation failed", e);
+      throw new Error("유효하지 않은 API 키입니다. 다시 확인해주세요.");
+    }
+  }, []);
+
+  const handleDeleteKey = useCallback(() => {
+    localStorage.removeItem(API_KEY_STORAGE_KEY);
+    setApiKey(null);
+    setIsApiKeyModalOpen(true);
+  }, []);
+
+  const openApiKeyModal = () => {
+    setError(null); // Clear generation errors when opening modal manually
+    setIsApiKeyModalOpen(true);
   };
   
-  const openApiKeyModal = () => setIsApiKeyModalOpen(true);
-  const closeApiKeyModal = () => setIsApiKeyModalOpen(false);
+  const closeApiKeyModal = () => {
+    // Prevent closing the modal if no API key is set
+    if (apiKey) {
+      setIsApiKeyModalOpen(false);
+    }
+  };
 
   const handleGenerate = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!prompt.trim() || isLoading) return;
+    if (!prompt.trim() || isLoading || !apiKey) return;
 
     setIsLoading(true);
     setError(null);
     setImages([]);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       const generatedImages = await generateWallpapers(prompt, ai);
       setImages(generatedImages);
     } catch (e) {
-      if (e instanceof Error && e.message.includes('Requested entity was not found')) {
-        setError('API 키가 유효하지 않습니다. 다시 선택해주세요.');
-        setHasApiKey(false); // Reset key state to show select key screen
+      if (e instanceof Error && (e.message.includes('API key not valid') || e.message.includes('API_KEY_INVALID') || e.message.includes('permission to use this API'))) {
+        setError('API 키가 유효하지 않습니다. 새 키를 설정해주세요.');
+        handleDeleteKey();
       } else {
         setError('이미지 생성에 실패했습니다. 잠시 후 다시 시도해주세요.');
       }
@@ -73,7 +90,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, isLoading]);
+  }, [prompt, isLoading, apiKey, handleDeleteKey]);
 
   const handleImageClick = (image: string) => {
     setSelectedImage(image);
@@ -98,16 +115,16 @@ const App: React.FC = () => {
      // The prompt is already in the state, so the user can edit it right away.
   };
 
-  const showModal = !hasApiKey || isApiKeyModalOpen;
+  const showModal = isApiKeyModalOpen || !apiKey;
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col font-sans relative">
       {showModal && (
         <ApiKeyModal
-          error={error}
-          onSelectKey={handleSelectKey}
+          onSave={handleSaveAndTestKey}
+          onDelete={handleDeleteKey}
           onClose={closeApiKeyModal}
-          hasExistingKey={hasApiKey}
+          hasExistingKey={!!apiKey}
         />
        )}
       
@@ -160,7 +177,7 @@ const App: React.FC = () => {
             </button>
           </form>
 
-          {error && hasApiKey && (
+          {error && apiKey && (
               <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg relative w-full text-center mb-4" role="alert">
                   <strong className="font-bold">오류: </strong>
                   <span className="block sm:inline">{error}</span>
