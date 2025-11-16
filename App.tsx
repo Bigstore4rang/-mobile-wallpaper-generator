@@ -3,21 +3,13 @@ import { generateWallpapers } from './services/geminiService';
 import { ImageGrid } from './components/ImageGrid';
 import { FullScreenView } from './components/FullScreenView';
 import { Loader } from './components/Loader';
-import { SparklesIcon } from './components/icons';
+import { KeyIcon, SparklesIcon } from './components/icons';
 import { GoogleGenAI } from '@google/genai';
+import { ApiKeyModal } from './components/ApiKeyModal';
 
-// Fix: Define a named interface for `window.aistudio` to resolve TypeScript declaration conflicts.
-// The error indicated a mismatch between the provided inline type and an existing named type `AIStudio`.
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
-
-declare global {
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
+// Fix: Removed conflicting TypeScript declarations for `window.aistudio`.
+// These declarations are likely already provided by a global type definition file from a dependency,
+// and re-declaring them causes a conflict. The compiler will now use the correct existing types.
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
@@ -26,6 +18,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
 
   const checkApiKey = useCallback(async () => {
     try {
@@ -46,10 +39,16 @@ const App: React.FC = () => {
       await window.aistudio.openSelectKey();
       // Assume success to handle potential race condition
       setHasApiKey(true);
+      setError(null); // Clear previous API key errors
+      setIsApiKeyModalOpen(false); // Close modal on success
     } catch (e) {
       console.error("Error opening select key dialog:", e);
+      // Don't change hasApiKey state on cancellation
     }
   };
+  
+  const openApiKeyModal = () => setIsApiKeyModalOpen(true);
+  const closeApiKeyModal = () => setIsApiKeyModalOpen(false);
 
   const handleGenerate = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
@@ -99,91 +98,96 @@ const App: React.FC = () => {
      // The prompt is already in the state, so the user can edit it right away.
   };
 
-  if (!hasApiKey) {
-    return (
-      <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center justify-center font-sans p-4">
-        <div className="text-center max-w-md">
-          <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 mb-4">
-            AI 배경화면 생성기
-          </h1>
-          <p className="mb-6 text-gray-300">
-            {error ? error : '시작하려면 API 키를 선택해주세요.'}
-          </p>
-          <button
-            onClick={handleSelectKey}
-            className="px-6 py-3 text-lg font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-md hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 transition-all duration-300"
-          >
-            API 키 선택
-          </button>
-          <p className="mt-4 text-sm text-gray-500">
-            API 키 사용에 대한 요금이 부과될 수 있습니다. <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-purple-400">자세히 알아보기</a>
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const showModal = !hasApiKey || isApiKeyModalOpen;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col font-sans">
-      <header className="p-4 border-b border-gray-700 shadow-lg bg-gray-800/50 backdrop-blur-sm">
-        <h1 className="text-2xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
-          AI 배경화면 생성기
-        </h1>
-      </header>
-
-      <main className="flex-grow p-4 md:p-6 flex flex-col items-center w-full max-w-4xl mx-auto">
-        <form onSubmit={handleGenerate} className="w-full mb-6">
-          <label htmlFor="prompt" className="block text-lg font-medium mb-2 text-gray-300">
-            어떤 분위기의 배경화면을 원하시나요?
-          </label>
-          <div className="relative">
-            <textarea
-              id="prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="예: 비 오는 서정적인 도시 풍경, 네온사인, 8k"
-              className="w-full h-24 p-4 pr-12 bg-gray-800 border-2 border-gray-700 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors resize-none text-white placeholder-gray-500"
-              disabled={isLoading}
-            />
-          </div>
+    <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col font-sans relative">
+      {showModal && (
+        <ApiKeyModal
+          error={error}
+          onSelectKey={handleSelectKey}
+          onClose={closeApiKeyModal}
+          hasExistingKey={hasApiKey}
+        />
+       )}
+      
+      <div className={`flex flex-col min-h-screen ${showModal ? 'blur-sm pointer-events-none' : 'transition-filter duration-300'}`}>
+        <header className="p-4 border-b border-gray-700 shadow-lg bg-gray-800/50 backdrop-blur-sm sticky top-0 z-10 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
+            AI 배경화면 생성기
+          </h1>
            <button
-            type="submit"
-            disabled={isLoading || !prompt.trim()}
-            className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 text-lg font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-md hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+            onClick={openApiKeyModal}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-gray-300 bg-gray-700/50 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 transition-colors"
+            aria-label="API 키 설정"
           >
-            {isLoading ? (
-              <>
-                <Loader />
-                생성 중...
-              </>
-            ) : (
-              <>
-                <SparklesIcon />
-                배경화면 생성
-              </>
-            )}
+            <KeyIcon />
+            API 키 설정
           </button>
-        </form>
+        </header>
 
-        {error && (
-            <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg relative w-full text-center" role="alert">
-                <strong className="font-bold">오류: </strong>
-                <span className="block sm:inline">{error}</span>
+        <main className="flex-grow p-4 md:p-6 flex flex-col items-center w-full max-w-4xl mx-auto">
+          <form onSubmit={handleGenerate} className="w-full mb-6">
+            <label htmlFor="prompt" className="block text-lg font-medium mb-2 text-gray-300">
+              어떤 분위기의 배경화면을 원하시나요?
+            </label>
+            <div className="relative">
+              <textarea
+                id="prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="예: 비 오는 서정적인 도시 풍경, 네온사인, 8k"
+                className="w-full h-24 p-4 pr-12 bg-gray-800 border-2 border-gray-700 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors resize-none text-white placeholder-gray-500"
+                disabled={isLoading}
+              />
             </div>
-        )}
+            <button
+              type="submit"
+              disabled={isLoading || !prompt.trim()}
+              className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 text-lg font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-md hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+            >
+              {isLoading ? (
+                <>
+                  <Loader />
+                  생성 중...
+                </>
+              ) : (
+                <>
+                  <SparklesIcon />
+                  배경화면 생성
+                </>
+              )}
+            </button>
+          </form>
 
-        {images.length > 0 && !isLoading && (
-          <ImageGrid images={images} onImageClick={handleImageClick} />
-        )}
-        
-        {!isLoading && images.length === 0 && !error && (
-          <div className="text-center text-gray-500 flex-grow flex flex-col justify-center">
-            <p>원하는 스타일을 설명하고 버튼을 눌러보세요.</p>
-            <p className="text-sm">4개의 고유한 배경화면이 생성됩니다.</p>
-          </div>
-        )}
+          {error && hasApiKey && (
+              <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg relative w-full text-center mb-4" role="alert">
+                  <strong className="font-bold">오류: </strong>
+                  <span className="block sm:inline">{error}</span>
+              </div>
+          )}
 
-      </main>
+          {images.length > 0 && !isLoading && (
+            <ImageGrid images={images} onImageClick={handleImageClick} />
+          )}
+          
+          {!isLoading && images.length === 0 && !error && (
+            <div className="text-center text-gray-500 flex-grow flex flex-col justify-center">
+              <p>원하는 스타일을 설명하고 버튼을 눌러보세요.</p>
+              <p className="text-sm">4개의 고유한 배경화면이 생성됩니다.</p>
+            </div>
+          )}
+
+          {isLoading && (
+            <div className="text-center text-gray-400 flex-grow flex flex-col justify-center items-center">
+                <Loader />
+                <p className="mt-4">배경화면을 생성하고 있습니다...</p>
+                <p className="text-sm text-gray-500">잠시만 기다려주세요.</p>
+            </div>
+          )}
+
+        </main>
+      </div>
 
       {selectedImage && (
         <FullScreenView
