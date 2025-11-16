@@ -1,10 +1,23 @@
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { generateWallpapers } from './services/geminiService';
 import { ImageGrid } from './components/ImageGrid';
 import { FullScreenView } from './components/FullScreenView';
 import { Loader } from './components/Loader';
-import { SparklesIcon, XMarkIcon } from './components/icons';
+import { SparklesIcon } from './components/icons';
+import { GoogleGenAI } from '@google/genai';
+
+// Fix: Define a named interface for `window.aistudio` to resolve TypeScript declaration conflicts.
+// The error indicated a mismatch between the provided inline type and an existing named type `AIStudio`.
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    aistudio: AIStudio;
+  }
+}
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
@@ -12,6 +25,31 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+
+  const checkApiKey = useCallback(async () => {
+    try {
+      const keySelected = await window.aistudio.hasSelectedApiKey();
+      setHasApiKey(keySelected);
+    } catch (e) {
+      console.error("Error checking for API key:", e);
+      setHasApiKey(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkApiKey();
+  }, [checkApiKey]);
+
+  const handleSelectKey = async () => {
+    try {
+      await window.aistudio.openSelectKey();
+      // Assume success to handle potential race condition
+      setHasApiKey(true);
+    } catch (e) {
+      console.error("Error opening select key dialog:", e);
+    }
+  };
 
   const handleGenerate = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
@@ -22,10 +60,16 @@ const App: React.FC = () => {
     setImages([]);
 
     try {
-      const generatedImages = await generateWallpapers(prompt);
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const generatedImages = await generateWallpapers(prompt, ai);
       setImages(generatedImages);
     } catch (e) {
-      setError('이미지 생성에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      if (e instanceof Error && e.message.includes('Requested entity was not found')) {
+        setError('API 키가 유효하지 않습니다. 다시 선택해주세요.');
+        setHasApiKey(false); // Reset key state to show select key screen
+      } else {
+        setError('이미지 생성에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      }
       console.error(e);
     } finally {
       setIsLoading(false);
@@ -54,6 +98,30 @@ const App: React.FC = () => {
      setSelectedImage(null);
      // The prompt is already in the state, so the user can edit it right away.
   };
+
+  if (!hasApiKey) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center justify-center font-sans p-4">
+        <div className="text-center max-w-md">
+          <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 mb-4">
+            AI 배경화면 생성기
+          </h1>
+          <p className="mb-6 text-gray-300">
+            {error ? error : '시작하려면 API 키를 선택해주세요.'}
+          </p>
+          <button
+            onClick={handleSelectKey}
+            className="px-6 py-3 text-lg font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-md hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 transition-all duration-300"
+          >
+            API 키 선택
+          </button>
+          <p className="mt-4 text-sm text-gray-500">
+            API 키 사용에 대한 요금이 부과될 수 있습니다. <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-purple-400">자세히 알아보기</a>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col font-sans">

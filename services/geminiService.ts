@@ -1,13 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable is not set.");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-export async function generateWallpapers(prompt: string): Promise<string[]> {
+export async function generateWallpapers(prompt: string, ai: GoogleGenAI): Promise<string[]> {
     try {
         const response = await ai.models.generateImages({
             model: 'imagen-4.0-generate-001',
@@ -26,6 +20,6 @@ export async function generateWallpapers(prompt: string): Promise<string[]> {
         return response.generatedImages.map(img => `data:image/png;base64,${img.image.imageBytes}`);
     } catch (error) {
         console.error("Error generating wallpapers with Gemini:", error);
-        throw new Error("Failed to generate images from the API.");
+        throw error;
     }
 }
